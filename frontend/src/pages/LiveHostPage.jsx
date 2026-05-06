@@ -257,9 +257,9 @@ export default function LiveHostPage() {
     return (
       <div className="animate-in" style={{ maxWidth: '700px', margin: '0 auto' }}>
         <div className="page-header" style={{ textAlign: 'center' }}><h2>✅ {candidateName || 'Candidate'} Connected!</h2></div>
-        <div className="card" style={{ padding: '24px', textAlign: 'center' }}>
-          <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '100%', maxHeight: '400px', borderRadius: 'var(--radius-md)', background: '#000', marginBottom: '16px' }} />
-          <video ref={localVideoRef} autoPlay playsInline muted style={{ position: 'absolute', bottom: '80px', right: '24px', width: '150px', borderRadius: 'var(--radius-sm)', border: '2px solid var(--accent-primary)' }} />
+        <div className="card" style={{ padding: '24px', textAlign: 'center', position: 'relative' }}>
+          <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '100%', maxHeight: '400px', borderRadius: 'var(--radius-md)', background: '#000', marginBottom: '16px', objectFit: 'contain' }} />
+          <video ref={localVideoRef} autoPlay playsInline muted style={{ position: 'absolute', bottom: '80px', right: '40px', width: '120px', borderRadius: 'var(--radius-sm)', border: '2px solid var(--accent-primary)', objectFit: 'cover' }} />
           <p style={{ color: 'var(--text-secondary)', marginBottom: '16px' }}>{test?.questions?.length || 0} questions ready</p>
           <button className="btn btn-primary btn-lg" onClick={startInterview} style={{ width: '100%' }}>
             <Camera size={20} /> Start Interview
@@ -298,14 +298,14 @@ export default function LiveHostPage() {
         <div className="grid-2-1">
           {/* Candidate Video */}
           <div>
-            <div className="webcam-container" style={{ marginBottom: '16px', position: 'relative' }}>
-              <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--radius-md)' }} />
-              <div className="webcam-overlay">
+            <div style={{ marginBottom: '16px', position: 'relative', background: '#000', borderRadius: 'var(--radius-md)', overflow: 'hidden', aspectRatio: '16/9' }}>
+              <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <div style={{ position: 'absolute', top: '12px', left: '12px', display: 'flex', gap: '8px' }}>
                 <div className="webcam-badge live">● LIVE — {candidateName}</div>
                 {emotion && <div className="webcam-badge emotion">{emotion.label?.toUpperCase()} {Math.round(emotion.confidence * 100)}%</div>}
               </div>
               {/* Mini self-view */}
-              <video ref={localVideoRef} autoPlay playsInline muted style={{ position: 'absolute', bottom: '12px', right: '12px', width: '120px', borderRadius: 'var(--radius-sm)', border: '2px solid var(--accent-primary)' }} />
+              <video ref={localVideoRef} autoPlay playsInline muted style={{ position: 'absolute', bottom: '12px', right: '12px', width: '120px', height: '90px', borderRadius: 'var(--radius-sm)', border: '2px solid var(--accent-primary)', objectFit: 'cover' }} />
             </div>
 
             <button className="btn btn-primary btn-lg" onClick={handleNextQuestion} style={{ width: '100%' }}>

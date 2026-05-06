@@ -21,9 +21,12 @@ export default function LiveJoinPage() {
   const [localStream, setLocalStream] = useState(null)
   const [remoteStream, setRemoteStream] = useState(null)
   const currentQRef = useRef(0)
+  const transcriptRef = useRef('')
+  const [speechSupported, setSpeechSupported] = useState(true)
 
   // Keep currentQ ref in sync
   useEffect(() => { currentQRef.current = currentQ }, [currentQ])
+  useEffect(() => { transcriptRef.current = transcript }, [transcript])
 
   // Attach streams to video elements
   useEffect(() => {
@@ -63,13 +66,13 @@ export default function LiveJoinPage() {
             startSpeechRecognition()
           }
           if (data.type === 'nextQuestion') {
-            conn.send({ type: 'speech', questionIndex: currentQRef.current, text: transcript })
+            conn.send({ type: 'speech', questionIndex: currentQRef.current, text: transcriptRef.current })
             setCurrentQ(data.index)
             setTranscript('')
             restartSpeechRecognition()
           }
           if (data.type === 'end') {
-            conn.send({ type: 'speech', questionIndex: currentQRef.current, text: transcript })
+            conn.send({ type: 'speech', questionIndex: currentQRef.current, text: transcriptRef.current })
             stopSpeechRecognition()
             setStatus('ended')
           }
@@ -89,7 +92,7 @@ export default function LiveJoinPage() {
   // Speech recognition
   const startSpeechRecognition = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SR) return
+    if (!SR) { setSpeechSupported(false); return }
 
     const recognition = new SR()
     recognition.continuous = true
@@ -194,18 +197,18 @@ export default function LiveJoinPage() {
         {/* Camera + Transcript */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
           <div>
-            <div className="webcam-container" style={{ marginBottom: '12px' }}>
-              <video ref={localVideoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              <div className="webcam-overlay"><div className="webcam-badge live">● REC</div></div>
+            <div style={{ background: '#000', borderRadius: 'var(--radius-md)', overflow: 'hidden', aspectRatio: '4/3', marginBottom: '12px', position: 'relative' }}>
+              <video ref={localVideoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <div style={{ position: 'absolute', top: '8px', left: '8px' }}><div className="webcam-badge live">● REC</div></div>
             </div>
             {/* Interviewer small video */}
-            <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '100%', borderRadius: 'var(--radius-sm)', background: '#000', maxHeight: '150px' }} />
+            <video ref={remoteVideoRef} autoPlay playsInline style={{ width: '100%', borderRadius: 'var(--radius-sm)', background: '#000', maxHeight: '120px', objectFit: 'contain' }} />
           </div>
           <div className="card" style={{ minHeight: '200px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
               {isListening ? <Mic size={16} color="var(--color-danger)" /> : <MicOff size={16} color="var(--text-muted)" />}
               <span style={{ fontSize: '13px', fontWeight: 600, color: isListening ? 'var(--color-danger)' : 'var(--text-muted)' }}>
-                {isListening ? 'Listening...' : 'Mic off'}
+              {isListening ? 'Listening...' : speechSupported ? 'Mic off' : 'Speech not supported on this browser'}
               </span>
             </div>
             <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.7 }}>
