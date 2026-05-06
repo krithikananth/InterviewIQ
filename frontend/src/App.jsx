@@ -11,6 +11,8 @@ import ReportPage from './pages/ReportPage'
 import TakeTestPage from './pages/TakeTestPage'
 import CreateTestPage from './pages/CreateTestPage'
 import MyTestsPage from './pages/MyTestsPage'
+import LiveHostPage from './pages/LiveHostPage'
+import LiveJoinPage from './pages/LiveJoinPage'
 
 // Protected route wrapper
 function ProtectedRoute({ children }) {
@@ -26,12 +28,14 @@ function AppLayout() {
   const location = useLocation()
 
   // No sidebar for auth page or public test page
-  const noSidebar = ['/auth'].includes(location.pathname) || location.pathname.startsWith('/test/')
+  const noSidebar = ['/auth'].includes(location.pathname) || location.pathname.startsWith('/test/') || location.pathname.startsWith('/live/')
   if (noSidebar || !user) {
     return (
       <Routes>
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/test/:code" element={<TakeTestPage />} />
+        <Route path="/live/join/:roomId" element={<LiveJoinPage />} />
+        <Route path="/live/host/:roomId" element={<ProtectedRoute><LiveHostPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>
     )
@@ -99,6 +103,8 @@ function AppLayout() {
           <Route path="/create-test" element={<ProtectedRoute><CreateTestPage /></ProtectedRoute>} />
           <Route path="/my-tests" element={<ProtectedRoute><MyTestsPage /></ProtectedRoute>} />
           <Route path="/report" element={<ProtectedRoute><ReportPage /></ProtectedRoute>} />
+          <Route path="/live/host/:roomId" element={<ProtectedRoute><LiveHostPage /></ProtectedRoute>} />
+          <Route path="/live/join/:roomId" element={<LiveJoinPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

@@ -12,6 +12,7 @@ export default function CreateTestPage() {
   const [mode, setMode] = useState('async')
   const [loading, setLoading] = useState(false)
   const [shareLink, setShareLink] = useState(null)
+  const [hostLink, setHostLink] = useState(null)
 
   const addQuestion = () => setQuestions(prev => [...prev, { text: '', timeLimit: 90 }])
 
@@ -36,7 +37,14 @@ export default function CreateTestPage() {
       })
       const data = await res.json()
       if (res.ok) {
-        setShareLink(`${window.location.origin}/test/${data.test.shareCode}`)
+        const code = data.test.shareCode
+        if (mode === 'live') {
+          setHostLink(`${window.location.origin}/live/host/${code}`)
+          setShareLink(`${window.location.origin}/live/join/${code}`)
+        } else {
+          setShareLink(`${window.location.origin}/test/${code}`)
+          setHostLink(null)
+        }
       }
     } catch (err) {
       console.error(err)
@@ -52,24 +60,27 @@ export default function CreateTestPage() {
           background: 'rgba(0, 206, 201, 0.15)', display: 'inline-flex',
           alignItems: 'center', justifyContent: 'center', fontSize: '40px', marginBottom: '24px'
         }}>✅</div>
-        <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '12px' }}>Test Created!</h2>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Share this link with candidates</p>
+        <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '12px' }}>{hostLink ? 'Live Interview Created!' : 'Test Created!'}</h2>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>{hostLink ? 'Share the candidate link and open the host link to start' : 'Share this link with candidates'}</p>
+
+        {hostLink && (
+          <div className="card" style={{ padding: '20px', marginBottom: '16px' }}>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-success)', textTransform: 'uppercase', letterSpacing: '1px' }}>🎥 Your Host Link (Open this)</label>
+            <div style={{ background: 'rgba(0,206,201,0.08)', padding: '14px', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 500, wordBreak: 'break-all', color: 'var(--color-success)', margin: '8px 0 12px' }}>{hostLink}</div>
+            <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => { navigator.clipboard.writeText(hostLink) }}>📋 Copy Host Link</button>
+          </div>
+        )}
 
         <div className="card" style={{ padding: '20px' }}>
-          <div style={{
-            background: 'rgba(108, 92, 231, 0.08)', padding: '16px', borderRadius: 'var(--radius-md)',
-            fontSize: '14px', fontWeight: 500, wordBreak: 'break-all', color: 'var(--accent-secondary)',
-            marginBottom: '16px'
-          }}>{shareLink}</div>
-          <button className="btn btn-primary" style={{ width: '100%' }}
-            onClick={() => { navigator.clipboard.writeText(shareLink); }}>
-            <Share2 size={16} /> Copy Link
-          </button>
+          <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-secondary)', textTransform: 'uppercase', letterSpacing: '1px' }}>{hostLink ? '👤 Candidate Link (Share this)' : 'Share Link'}</label>
+          <div style={{ background: 'rgba(108, 92, 231, 0.08)', padding: '14px', borderRadius: 'var(--radius-md)', fontSize: '13px', fontWeight: 500, wordBreak: 'break-all', color: 'var(--accent-secondary)', margin: '8px 0 12px' }}>{shareLink}</div>
+          <button className="btn btn-outline" style={{ width: '100%' }} onClick={() => { navigator.clipboard.writeText(shareLink) }}><Share2 size={16} /> Copy Candidate Link</button>
         </div>
 
         <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px' }}>
+          {hostLink && <button className="btn btn-primary" onClick={() => window.open(hostLink, '_blank')}>🎥 Open Host Room</button>}
           <button className="btn btn-outline" onClick={() => navigate('/my-tests')}>View My Tests</button>
-          <button className="btn btn-primary" onClick={() => { setShareLink(null); setTitle(''); setDescription(''); setQuestions([{ text: '', timeLimit: 90 }]) }}>Create Another</button>
+          <button className="btn btn-outline" onClick={() => { setShareLink(null); setHostLink(null); setTitle(''); setDescription(''); setQuestions([{ text: '', timeLimit: 90 }]) }}>Create Another</button>
         </div>
       </div>
     )
