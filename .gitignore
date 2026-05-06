@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.env
+
+# ML Data & Models (too large for git)
+ml-service/data/
+ml-service/models/*.pth
+ml-service/models/*.png
+
+# Build
+frontend/dist/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+*.egg-info/
