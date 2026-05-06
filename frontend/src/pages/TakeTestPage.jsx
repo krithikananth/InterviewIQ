@@ -93,10 +93,19 @@ export default function TakeTestPage() {
     }, 500)
   }
 
-  // Speech recognition
+  // Speech recognition — restarts fresh for each question
   const startSpeechRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) return
+    startFreshRecognition()
+  }
+
+  const startFreshRecognition = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) return
+
+    // Stop any existing recognition
+    try { recognitionRef.current?.stop() } catch(e) {}
 
     const recognition = new SpeechRecognition()
     recognition.continuous = true
@@ -106,13 +115,17 @@ export default function TakeTestPage() {
     recognition.onresult = (event) => {
       let transcript = ''
       for (let i = 0; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript
+        if (event.results[i].isFinal) {
+          transcript += event.results[i][0].transcript + ' '
+        } else {
+          transcript += event.results[i][0].transcript
+        }
       }
-      setCurrentTranscript(transcript)
+      setCurrentTranscript(transcript.trim())
     }
 
     recognition.onerror = () => { setTimeout(() => { try { recognition.start() } catch(e) {} }, 1000) }
-    recognition.onend = () => { if (phase === 'test') { try { recognition.start() } catch(e) {} } }
+    recognition.onend = () => { setTimeout(() => { try { recognition.start() } catch(e) {} }, 500) }
 
     try { recognition.start(); setIsListening(true) } catch(e) {}
     recognitionRef.current = recognition
@@ -170,6 +183,8 @@ export default function TakeTestPage() {
     if (currentQ + 1 < test.questions.length) {
       setCurrentQ(currentQ + 1)
       setTimeLeft(test.questions[currentQ + 1].timeLimit)
+      // Restart speech recognition fresh for next question
+      startFreshRecognition()
     } else {
       finishTest(newAnswers)
     }
