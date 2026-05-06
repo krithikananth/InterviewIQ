@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { Camera, Mic, MicOff, ChevronRight, Clock, CheckCircle, AlertCircle, User, Mail, Phone, Building, Briefcase } from 'lucide-react'
 import jsPDF from 'jspdf'
 
-const ML_API = 'http://localhost:8000'
-const BACKEND_API = 'http://localhost:5000/api'
+const ML_API = import.meta.env.VITE_ML_URL || 'http://localhost:8000'
+const BACKEND_API = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
 const SAMPLE_QUESTIONS = [
   { text: "Tell me about yourself and your background.", timeLimit: 90, order: 1 },

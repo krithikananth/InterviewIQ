@@ -3,7 +3,7 @@ import Webcam from 'react-webcam'
 import { Camera, StopCircle, RotateCcw, Eye, Smile, TrendingUp, AlertCircle, Video, VideoOff, Download } from 'lucide-react'
 import jsPDF from 'jspdf'
 
-const ML_API = 'http://localhost:8000'
+const ML_API = import.meta.env.VITE_ML_URL || 'http://localhost:8000'
 const EMOTION_COLORS = {
   happy: '#fdcb6e', sad: '#74b9ff', angry: '#ff6b6b',
   fear: '#a29bfe', surprise: '#fd79a8', disgust: '#00b894', neutral: '#636e72'

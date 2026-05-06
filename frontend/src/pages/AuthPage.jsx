@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { LogIn, UserPlus, Mail, Lock, User, ArrowRight } from 'lucide-react'
+import { LogIn, UserPlus, Mail, Lock, User, ArrowRight, Eye, EyeOff } from 'lucide-react'
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { login, register } = useAuth()
@@ -128,10 +129,10 @@ export default function AuthPage() {
               <label style={{display: 'block', fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: '6px'}}>Password</label>
               <div style={{position: 'relative'}}>
                 <Lock size={16} style={{position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)'}} />
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
+                <input type={showPassword ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} required
                   placeholder={isLogin ? '••••••••' : 'Min 6 characters'}
                   style={{
-                    width: '100%', padding: '12px 12px 12px 40px', borderRadius: 'var(--radius-sm)',
+                    width: '100%', padding: '12px 40px 12px 40px', borderRadius: 'var(--radius-sm)',
                     border: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.03)',
                     color: 'var(--text-primary)', fontSize: '14px', outline: 'none',
                     transition: 'border-color 0.2s', boxSizing: 'border-box'
@@ -139,6 +140,14 @@ export default function AuthPage() {
                   onFocus={e => e.target.style.borderColor = 'var(--accent-primary)'}
                   onBlur={e => e.target.style.borderColor = 'var(--border-color)'}
                 />
+                <button type="button" onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+                    padding: '4px', display: 'flex', alignItems: 'center'
+                  }}>
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </div>
             </div>
 
