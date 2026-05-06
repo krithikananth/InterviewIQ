@@ -19,6 +19,19 @@ export default function LiveJoinPage() {
   const [transcript, setTranscript] = useState('')
   const [isListening, setIsListening] = useState(false)
   const [localStream, setLocalStream] = useState(null)
+  const [remoteStream, setRemoteStream] = useState(null)
+  const currentQRef = useRef(0)
+
+  // Keep currentQ ref in sync
+  useEffect(() => { currentQRef.current = currentQ }, [currentQ])
+
+  // Attach streams to video elements
+  useEffect(() => {
+    if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream
+  }, [localStream, status, joined])
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream
+  }, [remoteStream, status])
 
   const joinRoom = async () => {
     if (!name.trim()) return
@@ -50,14 +63,13 @@ export default function LiveJoinPage() {
             startSpeechRecognition()
           }
           if (data.type === 'nextQuestion') {
-            // Send current speech to host before moving on
-            conn.send({ type: 'speech', questionIndex: currentQ, text: transcript })
+            conn.send({ type: 'speech', questionIndex: currentQRef.current, text: transcript })
             setCurrentQ(data.index)
             setTranscript('')
             restartSpeechRecognition()
           }
           if (data.type === 'end') {
-            conn.send({ type: 'speech', questionIndex: currentQ, text: transcript })
+            conn.send({ type: 'speech', questionIndex: currentQRef.current, text: transcript })
             stopSpeechRecognition()
             setStatus('ended')
           }
@@ -65,9 +77,7 @@ export default function LiveJoinPage() {
 
         // Video call to host
         const call = peer.call(`interviewiq-host-${roomId}`, stream)
-        call.on('stream', (remoteStream) => {
-          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream
-        })
+        call.on('stream', (rs) => setRemoteStream(rs))
       })
 
       peer.on('error', (err) => console.error('Peer error:', err))

@@ -28,6 +28,15 @@ export default function LiveHostPage() {
   const [candidateName, setCandidateName] = useState('')
   const [report, setReport] = useState(null)
   const [localStream, setLocalStream] = useState(null)
+  const [remoteStream, setRemoteStream] = useState(null)
+
+  // Attach streams to video elements whenever they change
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream
+  }, [remoteStream, status])
+  useEffect(() => {
+    if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream
+  }, [localStream, status])
 
   // Load test data
   useEffect(() => {
@@ -51,20 +60,12 @@ export default function LiveHostPage() {
       navigator.mediaDevices.getUserMedia({ video: true, audio: true })
         .then(stream => {
           setLocalStream(stream)
-          if (localVideoRef.current) localVideoRef.current.srcObject = stream
           call.answer(stream)
-
-          call.on('stream', (remoteStream) => {
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream
-            setStatus('connected')
-          })
+          call.on('stream', (rs) => { setRemoteStream(rs); setStatus('connected') })
         })
         .catch(() => {
-          call.answer() // answer without stream
-          call.on('stream', (remoteStream) => {
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream
-            setStatus('connected')
-          })
+          call.answer()
+          call.on('stream', (rs) => { setRemoteStream(rs); setStatus('connected') })
         })
     })
 
