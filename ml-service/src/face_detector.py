@@ -27,8 +27,8 @@ class FaceDetector:
         )
         return [(int(x), int(y), int(w), int(h)) for (x, y, w, h) in faces]
 
-    def extract_face(self, frame, bbox, target_size=(48, 48)):
-        """Extract and preprocess face for emotion model. Returns (1,48,48,1) normalized array."""
+    def extract_face(self, frame, bbox, target_size=(64, 64)):
+        """Extract and preprocess face for emotion model. Returns (1,64,64,1) normalized array."""
         x, y, w, h = bbox
         pad_x, pad_y = int(w * 0.1), int(h * 0.1)
         fh, fw = frame.shape[:2]

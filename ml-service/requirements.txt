@@ -1,15 +1,34 @@
-# InterviewIQ ML Service Dependencies
+# Core ML Libraries
 tensorflow>=2.16.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Computer Vision & Image Processing
 opencv-python>=4.9.0
+opencv-contrib-python>=4.9.0
 mediapipe>=0.10.0
+Pillow>=10.2.0
+
+# Data Processing
 numpy>=1.26.0
 pandas>=2.2.0
 scikit-learn>=1.4.0
+scipy>=1.12.0
+
+# Visualization
 matplotlib>=3.8.0
 seaborn>=0.13.0
+
+# Data Download & Processing
+kagglehub>=0.3.0
+requests>=2.31.0
+
+# API & Server
 fastapi>=0.110.0
 uvicorn>=0.29.0
 python-multipart>=0.0.9
-Pillow>=10.2.0
+
+# Other
 xgboost>=2.0.0
-kagglehub>=0.3.0
+joblib>=1.4.0

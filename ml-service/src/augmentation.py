@@ -13,8 +13,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 TRAIN_DIR = BASE_DIR / 'data' / 'fer2013' / 'train'
 TEST_DIR = BASE_DIR / 'data' / 'fer2013' / 'test'
 
-IMG_SIZE = 48
-BATCH_SIZE = 64
+IMG_SIZE = 64
+BATCH_SIZE = 256  # Increased for better gradient estimates
 EMOTION_LABELS = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral']
 
 
@@ -44,15 +44,34 @@ def get_class_weights(train_dir):
 
 
 def get_train_transforms():
-    """Training transforms with augmentation."""
+    """Training transforms with advanced augmentation for 85% accuracy."""
     return transforms.Compose([
         transforms.Grayscale(num_output_channels=1),
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.RandomRotation(15),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1), shear=10),
-        transforms.ColorJitter(brightness=0.2),
-        transforms.ToTensor(),  # Converts to [0, 1] and (C, H, W)
+        # Geometric transforms
+        transforms.RandomRotation(20),  # Increased from 15
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomAffine(
+            degrees=10,
+            translate=(0.15, 0.15),  # Increased from 0.1
+            scale=(0.85, 1.15),  # Increased from 0.9-1.1
+            shear=15  # Increased from 10
+        ),
+        # Color/brightness transforms
+        transforms.ColorJitter(
+            brightness=0.3,  # Increased from 0.2
+            contrast=0.3,
+            saturation=0.2,
+            hue=0.1
+        ),
+        # Noise transforms
+        transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
+        # Final normalization
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485],  # ImageNet mean for grayscale
+            std=[0.229]     # ImageNet std for grayscale
+        )
     ])
 
 
@@ -62,6 +81,10 @@ def get_test_transforms():
         transforms.Grayscale(num_output_channels=1),
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
         transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485],
+            std=[0.229]
+        )
     ])
 
 
