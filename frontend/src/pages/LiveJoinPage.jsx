@@ -92,31 +92,95 @@ export default function LiveJoinPage() {
   // Speech recognition
   const startSpeechRecognition = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SR) { setSpeechSupported(false); return }
+    if (!SR) {
+      setSpeechSupported(false)
+      console.warn('Speech Recognition API not supported in this browser')
+      return
+    }
+    setSpeechSupported(true)
+    startNewRecognition()
+  }
+
+  const startNewRecognition = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SR) return
+
+    // Stop any existing
+    try { recognitionRef.current?.stop() } catch (e) {}
 
     const recognition = new SR()
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'en-US'
+    recognition.maxAlternatives = 1
 
-    recognition.onresult = (event) => {
-      let text = ''
-      for (let i = 0; i < event.results.length; i++) {
-        text += event.results[i][0].transcript + (event.results[i].isFinal ? ' ' : '')
-      }
-      setTranscript(text.trim())
+    // Accumulate final results separately
+    let accumulatedFinal = ''
+
+    recognition.onstart = () => {
+      setIsListening(true)
     }
 
-    recognition.onerror = () => setTimeout(() => { try { recognition.start() } catch (e) {} }, 1000)
-    recognition.onend = () => setTimeout(() => { try { recognition.start() } catch (e) {} }, 500)
+    recognition.onresult = (event) => {
+      let interimTranscript = ''
 
-    try { recognition.start(); setIsListening(true) } catch (e) {}
+      // Only process new results since last event
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+
+        if (event.results[i].isFinal) {
+          accumulatedFinal += transcript + ' '
+        } else {
+          interimTranscript += transcript
+        }
+      }
+
+      // Show accumulated final + interim
+      const displayText = (accumulatedFinal + interimTranscript).trim()
+      setTranscript(displayText)
+      transcriptRef.current = displayText
+    }
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error)
+      // Handle specific errors
+      if (['network', 'audio-capture', 'no-speech'].includes(event.error)) {
+        setIsListening(false)
+        setTimeout(() => {
+          try {
+            recognition.start()
+            setIsListening(true)
+          } catch (e) { console.error('Failed to restart:', e) }
+        }, 1500)
+      }
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+      // Auto-restart if still in interview
+      setTimeout(() => {
+        try {
+          recognition.start()
+          setIsListening(true)
+        } catch (e) { }
+      }, 500)
+    }
+
+    try {
+      recognition.start()
+      setIsListening(true)
+    } catch (e) {
+      console.error('Failed to start speech recognition:', e)
+    }
     recognitionRef.current = recognition
   }
 
   const restartSpeechRecognition = () => {
+    // Stop current recognition and start fresh for next question
     try { recognitionRef.current?.stop() } catch (e) {}
-    setTimeout(startSpeechRecognition, 300)
+    setTranscript('')
+    transcriptRef.current = ''
+    setTimeout(startNewRecognition, 300)
   }
 
   const stopSpeechRecognition = () => {

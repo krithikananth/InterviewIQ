@@ -96,7 +96,10 @@ export default function TakeTestPage() {
   // Speech recognition — restarts fresh for each question
   const startSpeechRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) return
+    if (!SpeechRecognition) {
+      console.warn('Speech Recognition API not supported in this browser')
+      return
+    }
     startFreshRecognition()
   }
 
@@ -111,23 +114,65 @@ export default function TakeTestPage() {
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'en-US'
+    recognition.maxAlternatives = 1
 
-    recognition.onresult = (event) => {
-      let transcript = ''
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          transcript += event.results[i][0].transcript + ' '
-        } else {
-          transcript += event.results[i][0].transcript
-        }
-      }
-      setCurrentTranscript(transcript.trim())
+    // Track accumulated final transcript
+    let accumulatedFinal = ''
+
+    recognition.onstart = () => {
+      setIsListening(true)
     }
 
-    recognition.onerror = () => { setTimeout(() => { try { recognition.start() } catch(e) {} }, 1000) }
-    recognition.onend = () => { setTimeout(() => { try { recognition.start() } catch(e) {} }, 500) }
+    recognition.onresult = (event) => {
+      let interimTranscript = ''
 
-    try { recognition.start(); setIsListening(true) } catch(e) {}
+      // Collect all results including final ones
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+
+        if (event.results[i].isFinal) {
+          accumulatedFinal += transcript + ' '
+        } else {
+          interimTranscript += transcript
+        }
+      }
+
+      // Display: accumulated final + current interim
+      const displayText = (accumulatedFinal + interimTranscript).trim()
+      setCurrentTranscript(displayText)
+    }
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error)
+      // Auto-restart on common errors (network, audio)
+      if (['network', 'audio-capture', 'no-speech'].includes(event.error)) {
+        setIsListening(false)
+        setTimeout(() => {
+          try {
+            recognition.start()
+            setIsListening(true)
+          } catch(e) { console.error('Failed to restart recognition:', e) }
+        }, 1500)
+      }
+    }
+
+    recognition.onend = () => {
+      setIsListening(false)
+      // Auto-restart to keep listening indefinitely
+      setTimeout(() => {
+        try {
+          recognition.start()
+          setIsListening(true)
+        } catch(e) { }
+      }, 500)
+    }
+
+    try {
+      recognition.start()
+      setIsListening(true)
+    } catch(e) {
+      console.error('Failed to start speech recognition:', e)
+    }
     recognitionRef.current = recognition
   }
 

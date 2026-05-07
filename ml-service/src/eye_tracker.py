@@ -60,6 +60,7 @@ class EyeTracker:
         """
         Process a frame and estimate eye contact.
         Uses face position centering + eye detection as proxy for eye contact.
+        More lenient thresholds for better real-world performance.
         """
         self.total_frames += 1
         h, w = frame.shape[:2]
@@ -81,25 +82,31 @@ class EyeTracker:
         face_cx = (x + fw / 2) / w
         face_cy = (y + fh / 2) / h
 
-        # Check if face is centered (proxy for looking at camera)
-        head_centered_x = 0.25 < face_cx < 0.75
-        head_centered_y = 0.2 < face_cy < 0.8
+        # Check if face is centered (RELAXED thresholds for real-world use)
+        # Allow more peripheral positioning - camera doesn't need to be perfectly centered
+        head_centered_x = 0.1 < face_cx < 0.9  # Was 0.25-0.75, now 0.1-0.9 (wider tolerance)
+        head_centered_y = 0.05 < face_cy < 0.95  # Was 0.2-0.8, now more lenient
 
         # Detect eyes within face region
         face_roi = gray[y:y+fh, x:x+fw]
         eyes = self.eye_cascade.detectMultiScale(face_roi, 1.1, 3, minSize=(15, 15))
-        eyes_detected = len(eyes) >= 2  # Both eyes visible = likely looking at camera
 
-        # Check face stability (not moving too fast)
+        # RELAXED: Accept if at least 1 eye detected OR face is well-centered
+        # Haar cascade eye detection is unreliable, so use face centering as primary signal
+        eyes_detected = len(eyes) >= 1  # Changed from >= 2 to >= 1
+        face_well_centered = 0.25 < face_cx < 0.75 and 0.2 < face_cy < 0.8
+
+        # Check face stability (not moving too fast) - RELAXED from 0.05 to 0.1
         stable = True
         if self.last_face_center is not None:
             dx = abs(face_cx - self.last_face_center[0])
             dy = abs(face_cy - self.last_face_center[1])
-            stable = dx < 0.05 and dy < 0.05
+            stable = dx < 0.1 and dy < 0.1  # Was 0.05, now 0.1 (more lenient)
         self.last_face_center = (face_cx, face_cy)
 
-        # Determine eye contact
-        is_looking = head_centered_x and head_centered_y and eyes_detected
+        # Determine eye contact - relax criteria
+        # Looking at camera if: centered AND (eye detected OR well-positioned) OR (stable in general position)
+        is_looking = head_centered_x and head_centered_y and (eyes_detected or face_well_centered)
 
         if is_looking:
             self.contact_frames += 1
