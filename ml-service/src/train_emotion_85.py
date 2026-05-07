@@ -36,13 +36,13 @@ TRAIN_DIR = BASE_DIR / 'data' / 'fer2013' / 'train'
 
 IMG_SIZE = 64  # Increased from 48
 NUM_CLASSES = 7
-BATCH_SIZE = 256  # Larger batch for better gradient estimates
+BATCH_SIZE = 64  # Reduced from 256 (was too large)
 EPOCHS = 200  # More epochs for convergence
-LEARNING_RATE = 0.001
-LABEL_SMOOTHING = 0.2
+LEARNING_RATE = 0.0005  # Reduced from 0.001
+LABEL_SMOOTHING = 0.1  # Reduced from 0.2
 EMOTION_LABELS = ['angry', 'disgust', 'fear', 'happy', 'sad', 'surprise', 'neutral']
-FOCAL_GAMMA = 2.0  # Focal loss: focus on hard samples
-FOCAL_ALPHA = 0.25
+FOCAL_GAMMA = 1.5  # Reduced from 2.0 (less aggressive)
+FOCAL_ALPHA = 0.20  # Reduced from 0.25
 
 
 # =============================================================================
@@ -351,7 +351,7 @@ def train_v3_85():
     # Loss with Focal Loss + Label Smoothing
     criterion = FocalLoss(alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA, weight=focal_weights)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4, betas=(0.9, 0.999))
-    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=20, T_mult=2, eta_min=1e-6)
+    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2, eta_min=1e-5)  # Fixed: T_0=50, eta_min=1e-5
     scaler = GradScaler(enabled=device.type == 'cuda')
 
     # Training
