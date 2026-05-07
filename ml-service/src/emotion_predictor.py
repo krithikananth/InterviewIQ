@@ -81,6 +81,9 @@ class EmotionPredictor:
         else:
             tensor = face_image.to(self.device)
 
+        # Apply the same normalization used during training (mean=0.5, std=0.5)
+        tensor = (tensor - 0.5) / 0.5
+
         with torch.no_grad():
             logits = self.model(tensor)
             probs = F.softmax(logits, dim=1).cpu().numpy()[0]
@@ -103,6 +106,9 @@ class EmotionPredictor:
 
         batch = np.vstack(face_images)
         tensor = torch.FloatTensor(batch).permute(0, 3, 1, 2).to(self.device)
+
+        # Apply the same normalization used during training (mean=0.5, std=0.5)
+        tensor = (tensor - 0.5) / 0.5
 
         with torch.no_grad():
             logits = self.model(tensor)

@@ -69,8 +69,8 @@ def get_train_transforms():
         # Final normalization
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.485],  # ImageNet mean for grayscale
-            std=[0.229]     # ImageNet std for grayscale
+            mean=[0.5],    # Appropriate for grayscale face data
+            std=[0.5]      # Appropriate for grayscale face data
         )
     ])
 
@@ -82,8 +82,8 @@ def get_test_transforms():
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
         transforms.ToTensor(),
         transforms.Normalize(
-            mean=[0.485],
-            std=[0.229]
+            mean=[0.5],
+            std=[0.5]
         )
     ])
 
