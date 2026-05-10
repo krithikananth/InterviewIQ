@@ -100,6 +100,8 @@ async def analyze_frame(data: FrameInput):
 async def start_session(session_id: str = "default"):
     sessions[session_id] = ConfidenceScorer()
     eye_tracker.reset()
+    if hasattr(emotion_predictor, 'reset'):
+        emotion_predictor.reset()
     return {"session_id": session_id, "status": "started"}
 
 

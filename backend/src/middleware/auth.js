@@ -26,8 +26,9 @@ const optionalAuth = async (req, res, next) => {
     const token = req.header('Authorization')?.replace('Bearer ', '');
     if (token) {
       const decoded = jwt.verify(token, JWT_SECRET);
-      req.user = await User.findById(decoded.userId);
-      req.userId = user._id;
+      const foundUser = await User.findById(decoded.userId);
+      req.user = foundUser;
+      req.userId = foundUser?._id;
     }
   } catch (e) {}
   next();

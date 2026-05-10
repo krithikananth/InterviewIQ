@@ -23,6 +23,8 @@ export default function TakeTestPage() {
   const webcamRef = useRef(null)
   const analysisRef = useRef(null)
   const recognitionRef = useRef(null)
+  const accumulatedRef = useRef('')  // Persists accumulated transcript across recognition restarts
+  const isStoppedRef = useRef(false) // Prevent restart after intentional stop
 
   // Phases: details → test → report
   const [phase, setPhase] = useState('details')
@@ -107,17 +109,19 @@ export default function TakeTestPage() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) return
 
-    // Stop any existing recognition
-    try { recognitionRef.current?.stop() } catch(e) {}
+    // Stop any existing recognition cleanly
+    isStoppedRef.current = true
+    try { recognitionRef.current?.abort() } catch(e) {}
+
+    // Reset accumulated transcript for this question
+    accumulatedRef.current = ''
+    isStoppedRef.current = false
 
     const recognition = new SpeechRecognition()
     recognition.continuous = true
     recognition.interimResults = true
     recognition.lang = 'en-US'
     recognition.maxAlternatives = 1
-
-    // Track accumulated final transcript
-    let accumulatedFinal = ''
 
     recognition.onstart = () => {
       setIsListening(true)
@@ -126,45 +130,48 @@ export default function TakeTestPage() {
     recognition.onresult = (event) => {
       let interimTranscript = ''
 
-      // Collect all results including final ones
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript
-
         if (event.results[i].isFinal) {
-          accumulatedFinal += transcript + ' '
+          // Persist to ref so it survives recognition restarts
+          accumulatedRef.current += transcript + ' '
         } else {
           interimTranscript += transcript
         }
       }
 
       // Display: accumulated final + current interim
-      const displayText = (accumulatedFinal + interimTranscript).trim()
+      const displayText = (accumulatedRef.current + interimTranscript).trim()
       setCurrentTranscript(displayText)
     }
 
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error)
-      // Auto-restart on common errors (network, audio)
-      if (['network', 'audio-capture', 'no-speech'].includes(event.error)) {
+      if (isStoppedRef.current) return
+      // Auto-restart on recoverable errors
+      if (['network', 'audio-capture', 'no-speech', 'aborted'].includes(event.error)) {
         setIsListening(false)
         setTimeout(() => {
+          if (isStoppedRef.current) return
           try {
             recognition.start()
             setIsListening(true)
           } catch(e) { console.error('Failed to restart recognition:', e) }
-        }, 1500)
+        }, 1000)
       }
     }
 
     recognition.onend = () => {
       setIsListening(false)
-      // Auto-restart to keep listening indefinitely
+      if (isStoppedRef.current) return
+      // Auto-restart to keep listening continuously
       setTimeout(() => {
+        if (isStoppedRef.current) return
         try {
           recognition.start()
           setIsListening(true)
         } catch(e) { }
-      }, 500)
+      }, 300)
     }
 
     try {
@@ -203,13 +210,15 @@ export default function TakeTestPage() {
   // Next question
   const handleNextQuestion = () => {
     const q = test.questions[currentQ]
-    const duration = q.timeLimit - timeLeft
-    const fluency = analyzeFluency(currentTranscript, duration)
+    const duration = Math.max(1, q.timeLimit - timeLeft)
+    // Use the accumulated ref as the definitive transcript (survives recognition restarts)
+    const finalTranscript = (accumulatedRef.current || currentTranscript || '').trim()
+    const fluency = analyzeFluency(finalTranscript, duration)
 
     const answer = {
       questionIndex: currentQ,
       questionText: q.text,
-      speechText: currentTranscript,
+      speechText: finalTranscript,
       duration,
       emotionScores: emotionData?.emotion ? {
         dominant: emotionData.emotion.label,
@@ -224,6 +233,7 @@ export default function TakeTestPage() {
     const newAnswers = [...answers, answer]
     setAnswers(newAnswers)
     setCurrentTranscript('')
+    accumulatedRef.current = ''
 
     if (currentQ + 1 < test.questions.length) {
       setCurrentQ(currentQ + 1)
@@ -238,7 +248,8 @@ export default function TakeTestPage() {
   // Finish test
   const finishTest = async (finalAnswers) => {
     clearInterval(analysisRef.current)
-    try { recognitionRef.current?.stop() } catch(e) {}
+    isStoppedRef.current = true
+    try { recognitionRef.current?.abort() } catch(e) {}
     setIsListening(false)
     setPhase('report')
 
@@ -272,47 +283,115 @@ export default function TakeTestPage() {
     } catch (e) { console.error('Failed to save response:', e) }
   }
 
-  // Download PDF
+  // Download PDF — enhanced with readable formatting
   const downloadPDF = () => {
     if (!report) return
     const doc = new jsPDF()
     const { overallReport: r, respondentDetails: d, answers: a } = report
+    const pageW = doc.internal.pageSize.getWidth()
+    const pageH = doc.internal.pageSize.getHeight()
+    const margin = 20
+    const contentW = pageW - margin * 2
 
-    doc.setFontSize(22); doc.setTextColor(108, 92, 231)
-    doc.text('InterviewIQ — Test Report', 20, 22)
-    doc.setDrawColor(108, 92, 231); doc.line(20, 27, 190, 27)
+    // Helper: check if we need a new page
+    const checkPage = (needed) => {
+      if (y + needed > pageH - 25) {
+        doc.addPage()
+        y = margin
+        return true
+      }
+      return false
+    }
 
-    doc.setFontSize(11); doc.setTextColor(80, 80, 80)
-    doc.text(`Name: ${d.name}`, 20, 36)
-    doc.text(`Email: ${d.email}`, 20, 43)
-    if (d.phone) doc.text(`Phone: ${d.phone}`, 120, 36)
-    if (d.college) doc.text(`College: ${d.college}`, 120, 43)
-    if (d.position) doc.text(`Position: ${d.position}`, 20, 50)
-    doc.text(`Date: ${new Date().toLocaleString()}`, 120, 50)
+    // === HEADER ===
+    doc.setFontSize(24); doc.setTextColor(108, 92, 231)
+    doc.text('InterviewIQ', margin, 25)
+    doc.setFontSize(12); doc.setTextColor(120, 120, 120)
+    doc.text('Interview Test Report', margin, 33)
+    doc.setDrawColor(108, 92, 231); doc.setLineWidth(0.8)
+    doc.line(margin, 37, pageW - margin, 37)
 
-    let y = 62
-    doc.setFontSize(16); doc.setTextColor(40, 40, 40)
-    doc.text('Overall Scores', 20, y); y += 12
-    doc.setFontSize(12)
-    doc.text(`Grade: ${r.grade}`, 20, y)
-    doc.text(`Confidence: ${r.confidenceScore}/100`, 70, y)
-    doc.text(`Eye Contact: ${r.eyeContactScore}%`, 130, y); y += 8
-    doc.text(`Fluency: ${r.fluencyScore}/100`, 20, y)
-    doc.text(`Dominant Emotion: ${r.dominantEmotion}`, 70, y); y += 15
+    // === CANDIDATE INFO ===
+    let y = 46
+    doc.setFontSize(10); doc.setTextColor(80, 80, 80)
+    doc.text(`Name: ${d.name}`, margin, y)
+    doc.text(`Email: ${d.email}`, margin, y + 7)
+    if (d.phone) doc.text(`Phone: ${d.phone}`, 120, y)
+    if (d.college) doc.text(`College/Company: ${d.college}`, 120, y + 7)
+    if (d.position) doc.text(`Position: ${d.position}`, margin, y + 14)
+    doc.text(`Date: ${new Date().toLocaleString()}`, 120, y + 14)
+    y += 24
 
-    doc.setFontSize(14); doc.text('Question-by-Question Analysis', 20, y); y += 10
+    // === OVERALL SCORES BOX ===
+    doc.setDrawColor(200, 200, 210); doc.setLineWidth(0.3)
+    doc.setFillColor(248, 247, 255)
+    doc.roundedRect(margin, y, contentW, 32, 3, 3, 'FD')
+
+    doc.setFontSize(14); doc.setTextColor(108, 92, 231)
+    doc.text('Overall Performance', margin + 6, y + 10)
+
+    const scoreY = y + 22
+    doc.setFontSize(10); doc.setTextColor(60, 60, 60)
+    const gradeColor = r.grade === 'A' ? [0,180,0] : r.grade === 'B' ? [0,180,180] : r.grade === 'C' ? [200,150,0] : [200,50,50]
+    doc.setTextColor(...gradeColor); doc.setFontSize(16)
+    doc.text(`Grade: ${r.grade}`, margin + 6, scoreY)
+    doc.setFontSize(10); doc.setTextColor(60, 60, 60)
+    doc.text(`Confidence: ${r.confidenceScore}/100`, margin + 50, scoreY)
+    doc.text(`Eye Contact: ${r.eyeContactScore}%`, margin + 100, scoreY)
+    doc.text(`Fluency: ${r.fluencyScore}/100`, margin + 145, scoreY)
+    y += 40
+
+    // === QUESTION-BY-QUESTION ===
+    doc.setFontSize(14); doc.setTextColor(40, 40, 40)
+    doc.text('Question-by-Question Analysis', margin, y); y += 12
+
     a.forEach((ans, i) => {
-      if (y > 260) { doc.addPage(); y = 20 }
-      doc.setFontSize(10); doc.setTextColor(108, 92, 231)
-      doc.text(`Q${i+1}: ${ans.questionText}`, 20, y); y += 6
-      doc.setTextColor(80, 80, 80)
-      doc.text(`Emotion: ${ans.emotionScores.dominant} | Eye: ${ans.eyeContactScore}% | Fluency: ${ans.fluencyScore.overallScore}/100 | WPM: ${ans.fluencyScore.wordsPerMinute}`, 25, y); y += 5
-      const speechLines = doc.splitTextToSize(`Speech: "${ans.speechText || 'No speech detected'}"`, 160)
-      doc.text(speechLines, 25, y); y += speechLines.length * 4 + 6
+      // Estimate space needed for this question block
+      const speechText = ans.speechText || 'No speech detected'
+      const wrappedSpeech = doc.splitTextToSize(speechText, contentW - 16)
+      const blockHeight = 30 + wrappedSpeech.length * 5 + 10
+      checkPage(blockHeight)
+
+      // Question card background
+      doc.setFillColor(252, 252, 255); doc.setDrawColor(220, 218, 235)
+      doc.roundedRect(margin, y, contentW, blockHeight, 2, 2, 'FD')
+
+      // Question number + text
+      doc.setFontSize(11); doc.setTextColor(108, 92, 231)
+      const qLines = doc.splitTextToSize(`Q${i+1}: ${ans.questionText}`, contentW - 12)
+      doc.text(qLines, margin + 6, y + 7); 
+      let innerY = y + 7 + qLines.length * 5 + 2
+
+      // Metrics row
+      doc.setFontSize(9); doc.setTextColor(100, 100, 100)
+      doc.text(`Emotion: ${ans.emotionScores.dominant}`, margin + 6, innerY)
+      doc.text(`Eye Contact: ${ans.eyeContactScore}%`, margin + 50, innerY)
+      doc.text(`Fluency: ${ans.fluencyScore.overallScore}/100`, margin + 100, innerY)
+      doc.text(`WPM: ${ans.fluencyScore.wordsPerMinute}`, margin + 145, innerY)
+      innerY += 7
+
+      // Divider line
+      doc.setDrawColor(230, 228, 240); doc.setLineWidth(0.2)
+      doc.line(margin + 6, innerY - 2, pageW - margin - 6, innerY - 2)
+
+      // Speech answer — full text with proper wrapping
+      doc.setFontSize(9); doc.setTextColor(50, 50, 50)
+      doc.text('Answer:', margin + 6, innerY + 3)
+      doc.setTextColor(70, 70, 70)
+      doc.text(wrappedSpeech, margin + 8, innerY + 9)
+
+      y += blockHeight + 6
     })
 
-    doc.setFontSize(8); doc.setTextColor(150, 150, 150)
-    doc.text('Generated by InterviewIQ — AI Interview Analyzer', 20, 285)
+    // === FOOTER ===
+    const totalPages = doc.internal.getNumberOfPages()
+    for (let p = 1; p <= totalPages; p++) {
+      doc.setPage(p)
+      doc.setFontSize(8); doc.setTextColor(150, 150, 150)
+      doc.text('Generated by InterviewIQ — AI Interview Analyzer', margin, pageH - 10)
+      doc.text(`Page ${p} of ${totalPages}`, pageW - margin - 25, pageH - 10)
+    }
+
     doc.save(`InterviewIQ_${d.name.replace(/\s/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`)
   }
 
