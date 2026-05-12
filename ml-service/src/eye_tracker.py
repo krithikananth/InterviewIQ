@@ -1,14 +1,12 @@
 """
-InterviewIQ — Eye Contact Tracker (Enhanced)
-================================================
-Tracks eye contact using MediaPipe FaceLandmarker Tasks API for precise
-iris/pupil tracking. Falls back to OpenCV heuristic if unavailable.
+InterviewIQ — Eye Contact Tracker
+====================================
+Tracks eye contact using head position analysis.
+Uses MediaPipe if available, otherwise falls back to OpenCV Haar Cascade.
 
-Key improvements:
-- MediaPipe Tasks API FaceLandmarker for real landmark tracking (478 landmarks)
-- Iris position ratio for gaze direction estimation
-- Exponential moving average for smooth, stable scores
-- Proper left/right eye analysis with per-eye gaze scoring
+The OpenCV fallback is designed to be generous and stable:
+- Face centered + visible = likely looking at camera
+- EMA smoothing prevents score flickering
 """
 
 import cv2
@@ -17,30 +15,31 @@ import time
 import os
 
 
-# MediaPipe Face Mesh landmark indices for eyes
-# Left eye contour
-LEFT_EYE = [362, 385, 387, 263, 373, 380]
-# Right eye contour
-RIGHT_EYE = [33, 160, 158, 133, 153, 144]
-# Left iris center (from FaceLandmarker with output_face_blendshapes)
-LEFT_IRIS = [468, 469, 470, 471, 472]
-# Right iris center
-RIGHT_IRIS = [473, 474, 475, 476, 477]
-
-
 class EyeTracker:
-    """Eye contact tracking using MediaPipe FaceLandmarker + OpenCV fallback."""
+    """Eye contact tracking using face analysis."""
 
     def __init__(self):
-        self.available = True
         self.use_mediapipe = False
         self.landmarker = None
 
-        # Try loading MediaPipe Tasks API FaceLandmarker
+        # Try loading MediaPipe FaceLandmarker
         try:
             from mediapipe.tasks.python import vision, BaseOptions
+            import mediapipe as mp
 
             model_path = os.path.join(os.path.dirname(__file__), '..', 'models', 'face_landmarker.task')
+
+            # Auto-download if missing
+            if not os.path.exists(model_path):
+                try:
+                    import urllib.request
+                    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+                    url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+                    print("Downloading face_landmarker model...")
+                    urllib.request.urlretrieve(url, model_path)
+                    print(f"Downloaded ({os.path.getsize(model_path) // 1024}KB)")
+                except Exception as e:
+                    print(f"Could not download face model: {e}")
 
             if os.path.exists(model_path):
                 options = vision.FaceLandmarkerOptions(
@@ -53,225 +52,171 @@ class EyeTracker:
                 )
                 self.landmarker = vision.FaceLandmarker.create_from_options(options)
                 self.use_mediapipe = True
-                print("✅ Eye tracker initialized (MediaPipe FaceLandmarker Tasks API)")
-            else:
-                print(f"⚠️  FaceLandmarker model not found at {model_path}. Using OpenCV fallback.")
+                print("Eye tracker: MediaPipe FaceLandmarker")
         except Exception as e:
-            print(f"⚠️  MediaPipe FaceLandmarker unavailable ({e}). Using OpenCV heuristic.")
+            print(f"MediaPipe unavailable: {e}")
 
-        # Load cascades for fallback
-        self.eye_cascade = cv2.CascadeClassifier(
-            cv2.data.haarcascades + 'haarcascade_eye.xml'
-        )
+        # OpenCV cascades (always loaded as fallback)
         self.face_cascade = cv2.CascadeClassifier(
             cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
         )
+        self.eye_cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + 'haarcascade_eye.xml'
+        )
 
-        # Tracking state
+        if not self.use_mediapipe:
+            print("Eye tracker: OpenCV Haar Cascade (fallback)")
+
+        # State
         self.contact_frames = 0
         self.total_frames = 0
         self.history = []
         self.last_score = 0
         self.last_face_center = None
-
-        # Exponential moving average for smooth scores
-        self.ema_score = 50.0  # Start at 50%
-        self.ema_alpha = 0.15  # Smoothing factor
-
-        if not self.use_mediapipe:
-            print("✅ Eye tracker initialized (OpenCV Heuristic)")
+        self.ema_score = 50.0
+        self.ema_alpha = 0.12
 
     def process_frame(self, frame):
-        """Process a frame and estimate eye contact."""
+        """Process a video frame and return eye contact estimation."""
         self.total_frames += 1
 
-        if self.use_mediapipe:
+        if self.use_mediapipe and self.landmarker:
             return self._process_mediapipe(frame)
-        else:
-            return self._process_opencv(frame)
+        return self._process_opencv(frame)
 
     def _process_mediapipe(self, frame):
-        """Use MediaPipe FaceLandmarker Tasks API for precise gaze tracking."""
+        """MediaPipe-based gaze tracking with iris landmarks."""
         import mediapipe as mp
 
         h, w = frame.shape[:2]
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-        results = self.landmarker.detect(mp_image)
+        try:
+            results = self.landmarker.detect(mp_img)
+        except Exception:
+            return self._process_opencv(frame)
 
         if not results.face_landmarks or len(results.face_landmarks) == 0:
             self._update_ema(False)
-            return {
-                'is_looking': False,
-                'score': self._get_ema_score(),
-                'gaze_ratio': 0.0,
-                'head_centered': False
-            }
+            return self._make_result(False)
 
-        landmarks = results.face_landmarks[0]
+        lm = results.face_landmarks[0]
 
-        # Check if we have iris landmarks (need at least 478 landmarks)
-        has_iris = len(landmarks) > 472
+        # Nose tip for head pose
+        nose = lm[1]
+        head_ok = 0.2 < nose.x < 0.8 and 0.15 < nose.y < 0.85
 
-        if has_iris:
-            # Calculate gaze direction using iris position relative to eye corners
-            left_gaze = self._calculate_iris_gaze_tasks(landmarks, LEFT_EYE, LEFT_IRIS, w, h)
-            right_gaze = self._calculate_iris_gaze_tasks(landmarks, RIGHT_EYE, RIGHT_IRIS, w, h)
-
-            avg_gaze_x = (left_gaze[0] + right_gaze[0]) / 2
-            avg_gaze_y = (left_gaze[1] + right_gaze[1]) / 2
-
-            # Check if looking at camera
-            looking_h = 0.25 <= avg_gaze_x <= 0.75
-            looking_v = 0.20 <= avg_gaze_y <= 0.80
+        # Iris landmarks (468-477) for gaze if available
+        if len(lm) > 472:
+            # Left eye: contour [362,385,387,263,373,380], iris [468-472]
+            # Right eye: contour [33,160,158,133,153,144], iris [473-477]
+            lg = self._iris_ratio(lm, [362, 385, 387, 263, 373, 380], [468, 469, 470, 471, 472], w, h)
+            rg = self._iris_ratio(lm, [33, 160, 158, 133, 153, 144], [473, 474, 475, 476, 477], w, h)
+            gx = (lg[0] + rg[0]) / 2
+            gy = (lg[1] + rg[1]) / 2
+            looking = 0.25 <= gx <= 0.75 and 0.2 <= gy <= 0.8 and head_ok
         else:
-            # Fallback: use face orientation from landmarks
-            looking_h = True
-            looking_v = True
-            avg_gaze_x = 0.5
-            avg_gaze_y = 0.5
+            looking = head_ok
 
-        # Head pose estimation using nose tip
-        nose_tip = landmarks[1]
-        head_centered_x = 0.2 < nose_tip.x < 0.8
-        head_centered_y = 0.15 < nose_tip.y < 0.85
-
-        is_looking = looking_h and looking_v and head_centered_x and head_centered_y
-
-        # Continuous gaze quality score
-        gaze_quality_h = 1.0 - abs(avg_gaze_x - 0.5) * 2
-        gaze_quality_v = 1.0 - abs(avg_gaze_y - 0.5) * 2
-        gaze_quality = max(0, min(1, (gaze_quality_h * 0.6 + gaze_quality_v * 0.4)))
-
-        if is_looking:
+        if looking:
             self.contact_frames += 1
+        self._update_ema(looking)
+        return self._make_result(looking)
 
-        self._update_ema(is_looking, gaze_quality)
+    def _iris_ratio(self, lm, eye_idx, iris_idx, w, h):
+        """Calculate iris position as ratio within eye boundaries."""
+        eye_pts = [(lm[i].x * w, lm[i].y * h) for i in eye_idx]
+        iris_pts = [(lm[i].x * w, lm[i].y * h) for i in iris_idx if i < len(lm)]
 
-        score = self._get_ema_score()
-        self.history.append({'time': time.time(), 'looking': is_looking, 'quality': gaze_quality})
-        if len(self.history) > 300:
-            self.history = self.history[-300:]
-        self.last_score = score
-
-        return {
-            'is_looking': is_looking,
-            'score': score,
-            'gaze_ratio': round(gaze_quality, 2),
-            'head_centered': head_centered_x and head_centered_y
-        }
-
-    def _calculate_iris_gaze_tasks(self, landmarks, eye_indices, iris_indices, img_w, img_h):
-        """Calculate iris position relative to eye boundaries using Tasks API landmarks."""
-        eye_points = [(landmarks[i].x * img_w, landmarks[i].y * img_h) for i in eye_indices]
-        iris_points = [(landmarks[i].x * img_w, landmarks[i].y * img_h) for i in iris_indices
-                       if i < len(landmarks)]
-
-        if not iris_points:
+        if not iris_pts:
             return (0.5, 0.5)
 
-        iris_cx = np.mean([p[0] for p in iris_points])
-        iris_cy = np.mean([p[1] for p in iris_points])
+        ix = np.mean([p[0] for p in iris_pts])
+        iy = np.mean([p[1] for p in iris_pts])
 
-        eye_xs = [p[0] for p in eye_points]
-        eye_ys = [p[1] for p in eye_points]
-        eye_left, eye_right = min(eye_xs), max(eye_xs)
-        eye_top, eye_bottom = min(eye_ys), max(eye_ys)
+        xs = [p[0] for p in eye_pts]
+        ys = [p[1] for p in eye_pts]
+        ew = max(xs) - min(xs)
+        eh = max(ys) - min(ys)
 
-        eye_width = eye_right - eye_left
-        eye_height = eye_bottom - eye_top
-
-        if eye_width < 1 or eye_height < 1:
+        if ew < 1 or eh < 1:
             return (0.5, 0.5)
 
-        h_ratio = (iris_cx - eye_left) / eye_width
-        v_ratio = (iris_cy - eye_top) / eye_height
-
-        return (np.clip(h_ratio, 0, 1), np.clip(v_ratio, 0, 1))
+        return (np.clip((ix - min(xs)) / ew, 0, 1),
+                np.clip((iy - min(ys)) / eh, 0, 1))
 
     def _process_opencv(self, frame):
-        """Fallback: OpenCV-based eye contact estimation."""
+        """OpenCV fallback: face position + eye detection heuristic."""
         h, w = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.equalizeHist(gray)
 
         faces = self.face_cascade.detectMultiScale(
             gray, scaleFactor=1.1, minNeighbors=5,
-            minSize=(60, 60), flags=cv2.CASCADE_SCALE_IMAGE
+            minSize=(50, 50), flags=cv2.CASCADE_SCALE_IMAGE
         )
 
         if len(faces) == 0:
             self._update_ema(False)
-            return {
-                'is_looking': False,
-                'score': self._get_ema_score(),
-                'gaze_ratio': 0.0,
-                'head_centered': False
-            }
+            return self._make_result(False)
 
+        # Largest face
         x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
-        face_cx = (x + fw / 2) / w
-        face_cy = (y + fh / 2) / h
+        cx = (x + fw / 2) / w
+        cy = (y + fh / 2) / h
 
-        head_centered_x = 0.15 < face_cx < 0.85
-        head_centered_y = 0.10 < face_cy < 0.90
+        centered = 0.2 < cx < 0.8 and 0.15 < cy < 0.85
+        well_centered = 0.3 < cx < 0.7 and 0.25 < cy < 0.75
 
-        # Detect eyes in upper 60% of face
-        eye_region_h = int(fh * 0.6)
-        face_roi = gray[y:y + eye_region_h, x:x + fw]
-        eyes = self.eye_cascade.detectMultiScale(
-            face_roi, scaleFactor=1.1, minNeighbors=3,
-            minSize=(15, 15), maxSize=(fw // 2, eye_region_h // 2)
-        )
-
-        eyes_detected = len(eyes)
-        face_well_centered = 0.30 < face_cx < 0.70 and 0.25 < face_cy < 0.75
-
+        # Check movement stability
         stable = True
-        if self.last_face_center is not None:
-            dx = abs(face_cx - self.last_face_center[0])
-            dy = abs(face_cy - self.last_face_center[1])
+        if self.last_face_center:
+            dx = abs(cx - self.last_face_center[0])
+            dy = abs(cy - self.last_face_center[1])
             stable = dx < 0.08 and dy < 0.08
-        self.last_face_center = (face_cx, face_cy)
+        self.last_face_center = (cx, cy)
 
-        if eyes_detected >= 2 and head_centered_x and head_centered_y:
-            is_looking = True
-        elif eyes_detected >= 1 and face_well_centered and stable:
-            is_looking = True
-        elif face_well_centered and stable and head_centered_x:
-            is_looking = True
+        # Eye detection in upper face
+        roi_h = int(fh * 0.6)
+        roi = gray[y:y + roi_h, x:x + fw]
+        eyes = self.eye_cascade.detectMultiScale(
+            roi, scaleFactor=1.1, minNeighbors=3,
+            minSize=(12, 12), maxSize=(fw // 2, roi_h // 2)
+        )
+        n_eyes = len(eyes)
+
+        # Decision logic — generous to avoid false negatives
+        if n_eyes >= 2 and centered:
+            looking = True
+        elif n_eyes >= 1 and well_centered and stable:
+            looking = True
+        elif well_centered and stable:
+            looking = True  # Face centered and stable = probably looking
         else:
-            is_looking = False
+            looking = False
 
-        if is_looking:
+        if looking:
             self.contact_frames += 1
+        self._update_ema(looking)
+        return self._make_result(looking)
 
-        self._update_ema(is_looking)
+    def _update_ema(self, looking):
+        target = 100.0 if looking else 0.0
+        self.ema_score = self.ema_alpha * target + (1 - self.ema_alpha) * self.ema_score
 
-        score = self._get_ema_score()
-        self.history.append({'time': time.time(), 'looking': is_looking})
+    def _make_result(self, looking):
+        score = int(max(0, min(100, round(self.ema_score))))
+        self.history.append({'time': time.time(), 'looking': looking})
         if len(self.history) > 300:
             self.history = self.history[-300:]
         self.last_score = score
-
         return {
-            'is_looking': is_looking,
+            'is_looking': looking,
             'score': score,
-            'gaze_ratio': 0.5 if is_looking else 0.0,
-            'head_centered': head_centered_x and head_centered_y
+            'gaze_ratio': 0.5 if looking else 0.0,
+            'head_centered': looking
         }
-
-    def _update_ema(self, is_looking, quality=None):
-        """Update exponential moving average score."""
-        if quality is not None:
-            target = quality * 100
-        else:
-            target = 100.0 if is_looking else 0.0
-        self.ema_score = self.ema_alpha * target + (1 - self.ema_alpha) * self.ema_score
-
-    def _get_ema_score(self):
-        return int(max(0, min(100, round(self.ema_score))))
 
     def _get_running_score(self):
         if self.total_frames == 0:

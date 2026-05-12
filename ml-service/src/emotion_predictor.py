@@ -1,13 +1,11 @@
 """
-InterviewIQ — Emotion Predictor (PyTorch, Enhanced)
-======================================================
+InterviewIQ — Emotion Predictor (PyTorch)
+============================================
 Loads trained PyTorch CNN model and predicts emotions from face images.
 
-Key improvements:
-- Auto-detects model architecture from checkpoint
-- Proper normalization matching training pipeline
-- Temperature scaling for better-calibrated confidence scores
-- Frame averaging for more stable predictions
+CRITICAL: The training pipeline uses ONLY transforms.ToTensor() which maps
+pixel values to [0, 1] range. There is NO Normalize(mean, std) applied.
+Therefore inference must also use [0, 1] range — no extra normalization.
 """
 
 import numpy as np
@@ -26,8 +24,8 @@ EMOTION_COLORS = {
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE_DIR / 'models'
 
-# Temperature for softmax calibration (lower = sharper predictions)
-TEMPERATURE = 1.5
+# Temperature for softmax calibration (>1 = softer predictions, prevents overconfidence)
+TEMPERATURE = 1.8
 
 
 class EmotionPredictor:
@@ -37,9 +35,8 @@ class EmotionPredictor:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         if model_path is None:
-            # Try to load models in order of quality
-            for name in ['emotion_model_best.pth', 'emotion_model_v3_best.pth',
-                         'emotion_model_v2_best.pth', 'emotion_model.pth']:
+            for name in ['emotion_model_best.pth', 'emotion_model_v2_best.pth',
+                         'emotion_model.pth']:
                 candidate = MODEL_DIR / name
                 if candidate.exists():
                     model_path = str(candidate)
@@ -48,70 +45,53 @@ class EmotionPredictor:
         if model_path is None or not Path(model_path).exists():
             raise FileNotFoundError("Model not found. Train first with: python src/train_emotion.py")
 
-        print(f"📦 Loading emotion model from {Path(model_path).name}...")
+        print(f"Loading emotion model from {Path(model_path).name}...")
 
-        # Auto-detect architecture from state dict
+        # Load state dict
         state = torch.load(model_path, map_location=self.device, weights_only=True)
 
-        # Determine architecture by examining state dict keys
+        # Auto-detect and create model architecture
         model = self._create_model_from_state(state)
         model.load_state_dict(state)
 
         self.model = model.to(self.device)
         self.model.eval()
 
-        # Temporal smoothing buffer (average last N predictions)
-        self.prediction_buffer = deque(maxlen=5)
+        # Temporal smoothing buffer (average last N predictions for stability)
+        self.prediction_buffer = deque(maxlen=7)
 
-        print("✅ Emotion model loaded!")
+        print("Emotion model loaded successfully!")
 
     def _create_model_from_state(self, state_dict):
         """Auto-detect and create the correct model architecture from state dict keys."""
         keys = list(state_dict.keys())
 
-        # Check for v3 indicators (has expand_conv, MBConv blocks)
-        has_expand_conv = any('expand_conv' in k for k in keys)
-        # Check for v2 indicators (has shortcut, ResidualBlock)
+        # Check for v2 indicators (has stem, stage1, shortcut — ResidualBlock + SE)
+        has_stem = any('stem' in k for k in keys)
         has_shortcut = any('shortcut' in k for k in keys)
 
-        if has_expand_conv:
-            # v3 (EfficientNet-style MBConv)
+        if has_stem and has_shortcut:
             try:
                 import sys
                 sys.path.insert(0, str(Path(__file__).resolve().parent))
-                from train_emotion_85 import EmotionCNNv3
-                print("   Architecture: v3 (EfficientNet + MBConv)")
-                return EmotionCNNv3()
-            except Exception as e:
-                print(f"   Failed to load v3 architecture: {e}")
-
-        if has_shortcut:
-            # v2 (Residual + SE blocks)
-            try:
-                import sys
-                sys.path.insert(0, str(Path(__file__).resolve().parent))
-                from train_emotion import EmotionCNN
+                from train_emotion import EmotionCNNv2
                 print("   Architecture: v2 (ResNet + SE)")
-                return EmotionCNN()
-            except Exception as e:
-                print(f"   Failed to load v2 architecture: {e}")
+                return EmotionCNNv2()
+            except ImportError:
+                # If EmotionCNNv2 not found, try EmotionCNN alias
+                try:
+                    from train_emotion import EmotionCNN
+                    print("   Architecture: v2 (via EmotionCNN alias)")
+                    return EmotionCNN()
+                except Exception as e:
+                    print(f"   Failed to import model class: {e}")
 
-        # Fallback: try both
+        # Generic fallback: try importing whatever is available
         try:
             from train_emotion import EmotionCNN
             model = EmotionCNN()
-            # Test if state dict is compatible
             model.load_state_dict(state_dict)
-            print("   Architecture: v2 (fallback)")
-            return model
-        except Exception:
-            pass
-
-        try:
-            from train_emotion_85 import EmotionCNNv3
-            model = EmotionCNNv3()
-            model.load_state_dict(state_dict)
-            print("   Architecture: v3 (fallback)")
+            print("   Architecture: detected via fallback")
             return model
         except Exception:
             pass
@@ -121,8 +101,11 @@ class EmotionPredictor:
     def predict(self, face_image):
         """
         Predict emotion from preprocessed face image.
-        Args: face_image — numpy array (1, 48, 48, 1) normalized [0,1] (OpenCV format)
-        Returns: dict with emotion, confidence, all_scores (temporally smoothed)
+        
+        Args: face_image — numpy array (1, 48, 48, 1) normalized to [0, 1]
+              (this matches the training pipeline which uses only ToTensor())
+        
+        Returns: dict with emotion, confidence, all_scores
         """
         if face_image is None:
             return None
@@ -133,30 +116,28 @@ class EmotionPredictor:
         else:
             tensor = face_image.to(self.device)
 
-        # Apply the same normalization used during training (mean=0.5, std=0.5)
-        # Input face_image is in [0, 1] range from face_detector
-        # Training normalization: transforms.Normalize(mean=[0.5], std=[0.5])
-        # This maps [0,1] -> [-1,1]
-        tensor = (tensor - 0.5) / 0.5
+        # IMPORTANT: Do NOT apply any additional normalization!
+        # The training pipeline uses only transforms.ToTensor() which maps to [0, 1]
+        # The face_detector already outputs [0, 1] normalized images
+        # Adding (tensor - 0.5) / 0.5 would corrupt the input and cause "surprise" bias
 
         with torch.no_grad():
             logits = self.model(tensor)
             # Temperature-scaled softmax for better calibration
             probs = F.softmax(logits / TEMPERATURE, dim=1).cpu().numpy()[0]
 
-        # Add to temporal buffer
+        # Add to temporal buffer for smoothing
         self.prediction_buffer.append(probs)
 
-        # Average over recent predictions for stability
+        # Weighted average over recent predictions for stability
         if len(self.prediction_buffer) >= 2:
-            # Weighted average: more recent = higher weight
-            weights = np.array([0.5 ** (len(self.prediction_buffer) - 1 - i)
+            weights = np.array([0.6 ** (len(self.prediction_buffer) - 1 - i)
                                 for i in range(len(self.prediction_buffer))])
             weights /= weights.sum()
-            smoothed_probs = np.zeros_like(probs)
+            smoothed = np.zeros_like(probs)
             for w, p in zip(weights, self.prediction_buffer):
-                smoothed_probs += w * p
-            probs = smoothed_probs
+                smoothed += w * p
+            probs = smoothed
 
         emotion_idx = int(np.argmax(probs))
         emotion = EMOTION_LABELS[emotion_idx]
@@ -165,7 +146,7 @@ class EmotionPredictor:
             'emotion': emotion,
             'confidence': float(probs[emotion_idx]),
             'emotion_index': emotion_idx,
-            'all_scores': {EMOTION_LABELS[i]: float(probs[i]) for i in range(len(EMOTION_LABELS))},
+            'all_scores': {EMOTION_LABELS[i]: round(float(probs[i]), 4) for i in range(len(EMOTION_LABELS))},
             'color': EMOTION_COLORS.get(emotion, (255, 255, 255))
         }
 
@@ -176,9 +157,7 @@ class EmotionPredictor:
 
         batch = np.vstack(face_images)
         tensor = torch.FloatTensor(batch).permute(0, 3, 1, 2).to(self.device)
-
-        # Apply the same normalization used during training (mean=0.5, std=0.5)
-        tensor = (tensor - 0.5) / 0.5
+        # No extra normalization — input is already [0, 1]
 
         with torch.no_grad():
             logits = self.model(tensor)
@@ -191,7 +170,7 @@ class EmotionPredictor:
             results.append({
                 'emotion': emotion, 'confidence': float(pred[idx]),
                 'emotion_index': idx,
-                'all_scores': {EMOTION_LABELS[i]: float(pred[i]) for i in range(len(EMOTION_LABELS))},
+                'all_scores': {EMOTION_LABELS[i]: round(float(pred[i]), 4) for i in range(len(EMOTION_LABELS))},
                 'color': EMOTION_COLORS.get(emotion, (255, 255, 255))
             })
         return results
