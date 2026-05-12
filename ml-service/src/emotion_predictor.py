@@ -24,8 +24,8 @@ EMOTION_COLORS = {
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_DIR = BASE_DIR / 'models'
 
-# Temperature for softmax calibration (>1 = softer predictions, prevents overconfidence)
-TEMPERATURE = 1.8
+# Temperature for softmax (1.0 = standard, >1 = softer, <1 = sharper)
+TEMPERATURE = 1.0
 
 
 class EmotionPredictor:
